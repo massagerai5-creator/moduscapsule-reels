@@ -103,14 +103,46 @@ def main():
             filter_parts.append(f'{left}{right}xfade=transition={typ}:duration={TRANSITION}:offset={offset:.3f}{out}')
         font='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
         if not Path(font).exists(): font='/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf'
-        # Put brand and model on first half; phone and call-to-action at end, no prices or sizes.
-        draw=(f"[x4]drawtext=fontfile={font}:text='{text_safe(name)}':fontsize=58:fontcolor=white:"
-              f"box=1:boxcolor=black@0.54:boxborderw=18:x=(w-text_w)/2:y=210:enable='between(t,0.3,5.5)',"
-              f"drawtext=fontfile={font}:text='MODUSCAPSULE':fontsize=48:fontcolor=white:"
-              f"box=1:boxcolor=black@0.60:boxborderw=14:x=(w-text_w)/2:y=950:enable='between(t,12.0,15)',"
-              f"drawtext=fontfile={font}:text='{text_safe('+7 (499) 653 65 88')}':fontsize=37:fontcolor=white:"
-              f"box=1:boxcolor=black@0.65:boxborderw=15:x=(w-text_w)/2:y=1040:enable='between(t,12.0,15)'[v]")
-        filter_parts.append(draw)
+        # Feature captions only when backed by the selected product description.
+        desc = str(product.get('description') or '').lower()
+        rules = [
+            ('панорамн', 'ПАНОРАМНОЕ ОСТЕКЛЕНИЕ'),
+            ('климат-контрол', 'КЛИМАТ-КОНТРОЛЬ'),
+            ('энергоэффектив', 'ЭНЕРГОЭФФЕКТИВНОСТЬ'),
+            ('звукоизоляц', 'ЗВУКОИЗОЛЯЦИЯ'),
+            ('умный дом', 'СИСТЕМА УМНЫЙ ДОМ'),
+            ('освещени', 'СОВРЕМЕННОЕ ОСВЕЩЕНИЕ'),
+            ('отделк', 'СОВРЕМЕННАЯ ОТДЕЛКА'),
+            ('зонирован', 'УДОБНОЕ ЗОНИРОВАНИЕ'),
+        ]
+        features = []
+        if 'террас' in desc and 'подогрев' in desc:
+            features.append('ТЕРРАСА С ПОДОГРЕВОМ')
+        for keyword, label in rules:
+            if keyword in desc and label not in features:
+                features.append(label)
+        if 'готов' in desc and ('заселени' in desc or 'проживани' in desc):
+            features.append('ГОТОВ К ЗАСЕЛЕНИЮ')
+
+        draw = [
+            f"[x4]drawtext=fontfile={font}:text='{text_safe(name)}':fontsize=54:fontcolor=white:"
+            f"box=1:boxcolor=black@0.60:boxborderw=17:x=(w-text_w)/2:y=210:enable='between(t,0.2,2.5)'"
+        ]
+        for i, label in enumerate(features[:4]):
+            start_t = 2.65 + i * 2.35
+            end_t = min(start_t + 2.15, 12.0)
+            draw.append(
+                f"drawtext=fontfile={font}:text='{text_safe(label)}':fontsize=32:fontcolor=white:"
+                f"box=1:boxcolor=black@0.72:boxborderw=15:"
+                f"x=(w-text_w)/2:y=890:enable='between(t,{start_t:.2f},{end_t:.2f})'"
+            )
+        draw.extend([
+            f"drawtext=fontfile={font}:text='MODUSCAPSULE':fontsize=45:fontcolor=white:"
+            f"box=1:boxcolor=black@0.65:boxborderw=14:x=(w-text_w)/2:y=950:enable='between(t,12.1,15)'",
+            f"drawtext=fontfile={font}:text='{text_safe('+7 (499) 653 65 88')}':fontsize=37:fontcolor=white:"
+            f"box=1:boxcolor=black@0.70:boxborderw=15:x=(w-text_w)/2:y=1040:enable='between(t,12.1,15)'"
+        ])
+        filter_parts.append(','.join(draw) + '[v]')
         run(['ffmpeg','-y','-hide_banner','-loglevel','error',*inputs,'-filter_complex',';'.join(filter_parts),'-map','[v]','-an','-r',str(FPS),'-c:v','libx264','-preset','veryfast','-crf','24','-pix_fmt','yuv420p',str(work/'silent.mp4')])
         music=work/'music.wav'; original_music(music)
         output=OUT/'moduscapsule_reel.mp4'
