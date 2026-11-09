@@ -1,7 +1,7 @@
 import io, json, os, random, subprocess, tempfile, wave, math
 from pathlib import Path
 import requests
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw, ImageFont
 import numpy as np
 
 FEED = 'https://raw.githubusercontent.com/massagerai5-creator/moduscapsule-feed/refs/heads/main/moduscapsule_make_final_116.json'
@@ -76,12 +76,73 @@ def text_safe(s):
     return s.replace('\\','\\\\').replace(':','\\:').replace("'", "\\'").replace('%','\\%').replace(',','\\,')
 
 
+
+def features_from_product(product):
+    """Short factual captions derived only from the selected item's description."""
+    desc = str(product.get('description') or '').lower()
+    rules = [
+        ('панорамн', 'ПАНОРАМНОЕ ОСТЕКЛЕНИЕ'),
+        ('климат-контрол', 'КЛИМАТ-КОНТРОЛЬ'),
+        ('энергоэффектив', 'ЭНЕРГОЭФФЕКТИВНОСТЬ'),
+        ('звукоизоляц', 'ЗВУКОИЗОЛЯЦИЯ'),
+        ('умный дом', 'СИСТЕМА УМНЫЙ ДОМ'),
+        ('освещени', 'ПРОДУМАННОЕ ОСВЕЩЕНИЕ'),
+        ('зонирован', 'УДОБНОЕ ЗОНИРОВАНИЕ'),
+    ]
+    result = []
+    if 'террас' in desc and 'подогрев' in desc:
+        result.append('ТЕРРАСА С ПОДОГРЕВОМ')
+    for token, label in rules:
+        if token in desc and label not in result:
+            result.append(label)
+    if 'готов' in desc and ('заселени' in desc or 'проживани' in desc):
+        result.append('ГОТОВ К ЗАСЕЛЕНИЮ')
+    return result
+
+
+def create_first_frame(photo_path, product):
+    """Render readable automatic infographic directly onto the first product photo."""
+    im = Image.open(photo_path).convert('RGB').resize((W, H))
+    veil = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(veil)
+    # Text-safe margins for Instagram UI.
+    dr.rounded_rectangle((36, 160, W-36, 440), radius=25, fill=(9, 22, 30, 195))
+    dr.rounded_rectangle((36, 795, W-36, 1110), radius=25, fill=(9, 22, 30, 205))
+    dr.rectangle((60, 180, 69, 215), fill=(0, 202, 228, 255))
+    fonts = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf',
+    ]
+    font_path = next((f for f in fonts if Path(f).exists()), fonts[0])
+    def f(size): return ImageFont.truetype(font_path, size)
+    def fit(text, size, maxwidth, minsize=20):
+        while size > minsize and dr.textbbox((0,0),text,font=f(size))[2] > maxwidth:
+            size -= 2
+        return f(size)
+    name = str(product.get('name') or 'ModusCapsule').strip()
+    dr.text((90, 171), 'MODUSCAPSULE', font=f(26), fill=(0, 214, 235, 255))
+    dr.text((62, 238), name[:55], font=fit(name[:55], 54, W-125), fill='white')
+    dr.text((62, 320), 'КАПСУЛЬНЫЙ ДОМ', font=f(29), fill=(233, 240, 245, 255))
+    feats=features_from_product(product)[:4]
+    if not feats: feats=['СОВРЕМЕННЫЙ КАПСУЛЬНЫЙ ДОМ']
+    for i, feature in enumerate(feats):
+        yy=817+i*55
+        dr.ellipse((64,yy+10,76,yy+22), fill=(0, 210, 235,255))
+        dr.text((91, yy), feature, font=fit(feature, 26, W-175, 19), fill='white')
+    dr.text((62, 1052), '+7 (499) 653 65 88', font=f(27), fill=(255,255,255,255))
+    # Brand site is present on screen even when the product has no dimensions.
+    dr.text((390, 1052), 'moduscapsule.ru', font=f(23), fill=(0,210,235,255))
+    out=Image.alpha_composite(im.convert('RGBA'), veil).convert('RGB')
+    out.save(photo_path, quality=94)
+
+
 def main():
     product, total=get_product()
     name=product.get('name','ModusCapsule')
     print('Generating:', name, 'of', total, flush=True)
     with tempfile.TemporaryDirectory() as td:
         work=Path(td); photos=download_photos(product,work)
+        create_first_frame(photos[0], product)
         for i, fp in enumerate(photos):
             direction=1 if i%2==0 else -1
             # zoompan: noticeable zoom and motion, alternate direction, 66 frames each
@@ -103,31 +164,10 @@ def main():
             filter_parts.append(f'{left}{right}xfade=transition={typ}:duration={TRANSITION}:offset={offset:.3f}{out}')
         font='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
         if not Path(font).exists(): font='/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf'
-        # Feature captions only when backed by the selected product description.
-        desc = str(product.get('description') or '').lower()
-        rules = [
-            ('панорамн', 'ПАНОРАМНОЕ ОСТЕКЛЕНИЕ'),
-            ('климат-контрол', 'КЛИМАТ-КОНТРОЛЬ'),
-            ('энергоэффектив', 'ЭНЕРГОЭФФЕКТИВНОСТЬ'),
-            ('звукоизоляц', 'ЗВУКОИЗОЛЯЦИЯ'),
-            ('умный дом', 'СИСТЕМА УМНЫЙ ДОМ'),
-            ('освещени', 'СОВРЕМЕННОЕ ОСВЕЩЕНИЕ'),
-            ('отделк', 'СОВРЕМЕННАЯ ОТДЕЛКА'),
-            ('зонирован', 'УДОБНОЕ ЗОНИРОВАНИЕ'),
-        ]
-        features = []
-        if 'террас' in desc and 'подогрев' in desc:
-            features.append('ТЕРРАСА С ПОДОГРЕВОМ')
-        for keyword, label in rules:
-            if keyword in desc and label not in features:
-                features.append(label)
-        if 'готов' in desc and ('заселени' in desc or 'проживани' in desc):
-            features.append('ГОТОВ К ЗАСЕЛЕНИЮ')
+        # First frame already contains the automatic infographic; do not cover it with a second model title.
+        features = features_from_product(product)
 
-        draw = [
-            f"[x4]drawtext=fontfile={font}:text='{text_safe(name)}':fontsize=54:fontcolor=white:"
-            f"box=1:boxcolor=black@0.60:boxborderw=17:x=(w-text_w)/2:y=210:enable='between(t,0.2,2.5)'"
-        ]
+        draw = ['[x4]null']
         for i, label in enumerate(features[:4]):
             start_t = 2.65 + i * 2.35
             end_t = min(start_t + 2.15, 12.0)
