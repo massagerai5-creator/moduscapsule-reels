@@ -1,2 +1,2 @@
-# -moduscapsule-reels
+# moduscapsule-reels
 Automatic Instagram Reels
